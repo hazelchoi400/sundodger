@@ -1,0 +1,1124 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SunDodger">
+<meta name="theme-color" content="#0B0E11">
+<meta name="description" content="避日神器 — 即時太陽方位追蹤、座位建議、路線日曬分析">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-512.png">
+<title>☀️ SunDodger — 避日神器</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  --sun: #F7B731;
+  --sun-glow: #FF9F1C;
+  --shade: #2D3436;
+  --shade-deep: #1a1d1e;
+  --cool: #74B9FF;
+  --cool-deep: #0984E3;
+  --bg: #0B0E11;
+  --card: #151A1F;
+  --card-border: #222930;
+  --text: #E8ECEF;
+  --text-dim: #8395A7;
+  --danger: #FF6B6B;
+  --safe: #00D2D3;
+  --radius: 14px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Outfit', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* === HEADER === */
+.header {
+  flex-shrink: 0; z-index: 1000;
+  background: rgba(11,14,17,0.92);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--card-border);
+  padding: 10px 14px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.logo { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 17px; letter-spacing: -0.5px; }
+.logo-icon {
+  width: 28px; height: 28px;
+  background: radial-gradient(circle at 40% 40%, var(--sun), var(--sun-glow));
+  border-radius: 50%; box-shadow: 0 0 16px rgba(247,183,49,0.4);
+  animation: pulse 3s ease-in-out infinite;
+}
+@keyframes pulse { 0%,100%{box-shadow:0 0 16px rgba(247,183,49,0.3);}50%{box-shadow:0 0 28px rgba(247,183,49,0.6);} }
+.header-info { text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-dim); line-height: 1.4; }
+
+/* === TABS === */
+.tabs {
+  flex-shrink: 0; display: flex; gap: 4px; padding: 6px 10px;
+  background: var(--bg); overflow-x: auto; -webkit-overflow-scrolling: touch;
+}
+.tab {
+  flex-shrink: 0; padding: 7px 14px; border-radius: 10px;
+  font-size: 12px; font-weight: 500;
+  border: 1px solid var(--card-border); background: var(--card);
+  color: var(--text-dim); cursor: pointer; transition: all 0.2s; white-space: nowrap;
+}
+.tab.active {
+  background: linear-gradient(135deg, var(--sun), var(--sun-glow));
+  color: #000; border-color: transparent; font-weight: 600;
+  box-shadow: 0 4px 12px rgba(247,183,49,0.3);
+}
+
+/* === PANELS === */
+.panel-container { flex: 1; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
+.panel { display: none; padding: 12px; min-height: 100%; }
+.panel.active { display: block; }
+
+/* === TIME PICKER (shared) === */
+.time-mode-bar {
+  display: flex; gap: 6px; align-items: center;
+  margin-bottom: 12px; padding: 8px;
+  background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius);
+}
+.time-toggle {
+  display: flex; gap: 0; border-radius: 8px; overflow: hidden;
+  border: 1px solid var(--card-border); flex-shrink: 0;
+}
+.time-toggle-btn {
+  padding: 7px 14px; font-size: 12px; font-weight: 600;
+  border: none; cursor: pointer; font-family: 'Outfit', sans-serif;
+  background: var(--shade-deep); color: var(--text-dim);
+  transition: all 0.2s;
+}
+.time-toggle-btn.active {
+  background: var(--sun); color: #000;
+}
+.time-mode-bar input[type="datetime-local"] {
+  flex: 1; min-width: 0;
+  padding: 7px 10px; border-radius: 8px;
+  border: 1px solid var(--card-border); background: var(--shade-deep);
+  color: var(--text); font-size: 16px; font-family: 'Outfit', sans-serif; outline: none;
+  margin-left: 6px;
+}
+
+/* === MAP === */
+#mainMap { width: 100%; flex: 1; min-height: 0; }
+.map-panel { padding: 0 !important; display: none; flex-direction: column; position: relative; }
+.map-panel.active { display: flex !important; }
+
+.route-overlay {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 800;
+  background: rgba(11,14,17,0.92); backdrop-filter: blur(16px);
+  padding: 10px; border-bottom: 1px solid var(--card-border);
+  transform: translateY(-100%); transition: transform 0.3s ease;
+}
+.route-overlay.open { transform: translateY(0); }
+
+.route-input-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+.route-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.route-dot.start { background: var(--safe); }
+.route-dot.end { background: var(--danger); }
+
+.route-input {
+  flex: 1; padding: 9px 12px; border-radius: 10px;
+  border: 1px solid var(--card-border); background: var(--shade-deep);
+  color: var(--text); font-size: 16px; font-family: 'Outfit', sans-serif; outline: none;
+}
+.route-input:focus { border-color: var(--sun); }
+.route-input::placeholder { color: var(--text-dim); }
+
+.route-actions { display: flex; gap: 6px; }
+.route-btn {
+  flex: 1; padding: 9px; border-radius: 10px; border: none;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  font-family: 'Outfit', sans-serif; transition: all 0.2s;
+}
+.route-btn.primary { background: linear-gradient(135deg, var(--sun), var(--sun-glow)); color: #000; }
+.route-btn.secondary { background: var(--card); color: var(--text); border: 1px solid var(--card-border); }
+
+.map-fab {
+  position: absolute; z-index: 700; border: none; cursor: pointer;
+  border-radius: 12px; font-family: 'Outfit', sans-serif;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+.fab-route {
+  bottom: 20px; left: 50%; transform: translateX(-50%);
+  padding: 12px 24px;
+  background: linear-gradient(135deg, var(--sun), var(--sun-glow));
+  color: #000; font-size: 14px; font-weight: 700;
+  display: flex; align-items: center; gap: 8px;
+}
+.fab-locate {
+  bottom: 20px; right: 14px; width: 44px; height: 44px;
+  background: var(--card); color: var(--cool); font-size: 20px;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--card-border);
+}
+.fab-sun-toggle {
+  bottom: 72px; right: 14px; width: 44px; height: 44px;
+  background: var(--card); color: var(--sun); font-size: 20px;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--card-border);
+}
+
+.search-results {
+  position: absolute; left: 10px; right: 10px;
+  background: var(--card); border: 1px solid var(--card-border);
+  border-radius: 10px; max-height: 180px; overflow-y: auto;
+  z-index: 900; display: none;
+}
+.search-results.show { display: block; }
+.search-item {
+  padding: 10px 12px; font-size: 13px; cursor: pointer;
+  border-bottom: 1px solid var(--card-border); color: var(--text);
+}
+.search-item:hover,.search-item:active { background: var(--shade-deep); }
+.search-item:last-child { border-bottom: none; }
+.search-item small { color: var(--text-dim); display: block; margin-top: 2px; font-size: 11px; }
+
+.route-analysis {
+  position: absolute; bottom: 0; left: 0; right: 0; z-index: 750;
+  background: rgba(11,14,17,0.95); backdrop-filter: blur(16px);
+  border-top: 1px solid var(--card-border); border-radius: 16px 16px 0 0;
+  max-height: 45%; overflow-y: auto;
+  transform: translateY(100%); transition: transform 0.3s ease; padding: 14px;
+}
+.route-analysis.open { transform: translateY(0); }
+
+.analysis-handle { width: 36px; height: 4px; background: var(--text-dim); border-radius: 2px; margin: 0 auto 12px; }
+.analysis-title { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.analysis-summary { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+.analysis-stat { background: var(--shade-deep); border-radius: 10px; padding: 10px; text-align: center; }
+.analysis-stat .label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; }
+.analysis-stat .value { font-size: 18px; font-weight: 700; font-family: 'JetBrains Mono', monospace; margin-top: 2px; }
+.seg-list { display: flex; flex-direction: column; gap: 6px; }
+.seg-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px; border-radius: 10px; background: var(--shade-deep); font-size: 12px;
+}
+.seg-color { width: 6px; height: 36px; border-radius: 3px; flex-shrink: 0; }
+.seg-color.sun-left { background: var(--danger); }
+.seg-color.sun-right { background: var(--sun); }
+.seg-color.sun-front { background: var(--sun-glow); }
+.seg-color.sun-back { background: var(--safe); }
+.seg-color.night { background: var(--text-dim); }
+.seg-info { flex: 1; }
+.seg-info .seg-dir { font-weight: 600; color: var(--text); font-size: 13px; }
+.seg-info .seg-detail { color: var(--text-dim); margin-top: 2px; }
+.seg-advice { font-weight: 700; font-size: 13px; white-space: nowrap; }
+.seg-advice.left { color: var(--safe); }
+.seg-advice.right { color: var(--safe); }
+.seg-advice.ok { color: var(--text-dim); }
+
+/* === COMPASS === */
+.compass-wrap { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 16px; }
+.compass-container { position: relative; width: 260px; height: 260px; }
+.compass-bg {
+  width: 100%; height: 100%; border-radius: 50%;
+  background: conic-gradient(from 0deg,
+    rgba(255,107,107,0.08) 0deg, rgba(247,183,49,0.15) 90deg,
+    rgba(247,183,49,0.2) 180deg, rgba(116,185,255,0.08) 270deg,
+    rgba(255,107,107,0.08) 360deg);
+  border: 2px solid var(--card-border);
+}
+.compass-labels { position: absolute; inset: 0; font-size: 12px; font-weight: 600; color: var(--text-dim); }
+.compass-labels span { position: absolute; transform: translate(-50%,-50%); }
+.compass-labels .n { top: 8%; left: 50%; } .compass-labels .s { top: 92%; left: 50%; }
+.compass-labels .e { top: 50%; left: 92%; } .compass-labels .w { top: 50%; left: 8%; }
+.sun-marker {
+  position: absolute; width: 22px; height: 22px; border-radius: 50%;
+  background: radial-gradient(circle, #FFF 20%, var(--sun) 60%, transparent 100%);
+  box-shadow: 0 0 22px rgba(247,183,49,0.8);
+  transform: translate(-50%,-50%); transition: all 0.5s ease; z-index: 10;
+}
+.sun-marker.below { opacity: 0.3; box-shadow: 0 0 8px rgba(247,183,49,0.2); }
+.compass-center {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  width: 7px; height: 7px; background: var(--text); border-radius: 50%;
+}
+.compass-line {
+  position: absolute; top: 50%; left: 50%; width: 2px; height: 40%;
+  background: linear-gradient(to top, transparent, var(--sun));
+  transform-origin: bottom center; opacity: 0.5;
+}
+
+.info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+.info-card { background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius); padding: 12px; }
+.info-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 3px; }
+.info-value { font-size: 20px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+.info-sub { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.full-width { grid-column: 1 / -1; }
+
+.daylight-bar {
+  height: 28px; border-radius: 8px;
+  background: linear-gradient(90deg,
+    #1a1d2e 0%, #2d3436 var(--sunrise-pct),
+    #74B9FF var(--sunrise-pct), #F7B731 50%, #FF9F1C 65%,
+    #74B9FF var(--sunset-pct), #2d3436 var(--sunset-pct), #1a1d2e 100%);
+  position: relative; margin: 8px 0;
+}
+.daylight-now {
+  position: absolute; top: -3px; bottom: -3px; width: 3px;
+  background: #fff; border-radius: 2px;
+  box-shadow: 0 0 6px rgba(255,255,255,0.6); transition: left 0.5s;
+}
+.daylight-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; }
+
+/* === SEAT === */
+.seat-section { background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius); padding: 14px; margin-bottom: 12px; }
+.seat-section h3 { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
+.direction-picker { display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; margin-bottom: 14px; }
+.dir-btn {
+  padding: 9px 6px; border-radius: 10px;
+  border: 1px solid var(--card-border); background: var(--shade-deep);
+  color: var(--text-dim); font-size: 12px; font-weight: 500;
+  cursor: pointer; text-align: center; transition: all 0.2s;
+}
+.dir-btn.active { background: var(--cool-deep); color: #fff; border-color: var(--cool); }
+.vehicle-diagram { display: flex; justify-content: center; margin: 14px 0; }
+.vehicle {
+  position: relative; width: 130px; height: 190px;
+  border: 2px solid var(--card-border); border-radius: 28px 28px 18px 18px;
+  background: var(--shade-deep);
+}
+.vehicle::before { content: '▲'; position: absolute; top: 8px; left: 50%; transform: translateX(-50%); font-size: 12px; color: var(--text-dim); }
+.vehicle-label { position: absolute; top: 24px; left: 50%; transform: translateX(-50%); font-size: 9px; color: var(--text-dim); white-space: nowrap; }
+.v-seat {
+  position: absolute; width: 46px; height: 46px; border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 600; transition: all 0.3s;
+}
+.v-seat.left { left: 10px; } .v-seat.right { right: 10px; }
+.v-seat.front { top: 46px; } .v-seat.back { top: 112px; }
+.v-seat.safe { background: rgba(0,210,211,0.2); border: 2px solid var(--safe); color: var(--safe); }
+.v-seat.danger { background: rgba(255,107,107,0.15); border: 2px solid var(--danger); color: var(--danger); }
+.v-seat.neutral { background: rgba(131,149,167,0.1); border: 2px solid var(--text-dim); color: var(--text-dim); }
+.sun-indicator { position: absolute; font-size: 22px; transition: all 0.3s; }
+.seat-result {
+  padding: 14px; border-radius: 12px; text-align: center;
+  font-size: 14px; line-height: 1.5; min-height: 70px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+}
+.seat-result.shade { background: linear-gradient(135deg, rgba(0,210,211,0.1), rgba(9,132,227,0.1)); border: 1px solid rgba(0,210,211,0.3); }
+.seat-result.sun-side { background: linear-gradient(135deg, rgba(255,107,107,0.1), rgba(247,183,49,0.1)); border: 1px solid rgba(247,183,49,0.3); }
+.seat-result.night { background: rgba(131,149,167,0.1); border: 1px solid rgba(131,149,167,0.3); }
+.seat-big { font-size: 24px; font-weight: 800; }
+
+/* === TIMELINE === */
+.timeline-wrap { background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius); padding: 14px; margin-bottom: 12px; }
+.timeline-wrap h3 { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
+.time-display {
+  font-family: 'JetBrains Mono', monospace; font-size: 26px; font-weight: 700;
+  text-align: center; margin-bottom: 10px;
+  background: linear-gradient(135deg, var(--sun), var(--sun-glow));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+input[type="range"] {
+  -webkit-appearance: none; width: 100%; height: 6px;
+  border-radius: 3px; background: var(--card-border); outline: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--sun); cursor: pointer; box-shadow: 0 0 10px rgba(247,183,49,0.5);
+}
+
+.leaflet-container { background: var(--bg) !important; }
+.leaflet-control-zoom a { background: var(--card) !important; color: var(--text) !important; border-color: var(--card-border) !important; }
+.leaflet-control-attribution { display: none !important; }
+
+.loading-overlay {
+  position: absolute; inset: 0; z-index: 850;
+  background: rgba(11,14,17,0.8); display: none;
+  align-items: center; justify-content: center;
+  font-size: 14px; color: var(--text-dim);
+}
+.loading-overlay.show { display: flex; }
+.spinner { width: 28px; height: 28px; border: 3px solid var(--card-border); border-top-color: var(--sun); border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 10px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (min-width: 600px) { body { max-width: 480px; margin: 0 auto; } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo"><div class="logo-icon"></div>SunDodger</div>
+  <div class="header-info">
+    <div id="headerTime">--:--:--</div>
+    <div id="headerSun" style="font-size:10px;">☀️ --° / --°</div>
+    <div id="headerLoc" style="font-size:9px;color:var(--text-dim);">📍 定位中⋯</div>
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" data-tab="map">🗺 路線地圖</div>
+  <div class="tab" data-tab="compass">☀️ 太陽方位</div>
+  <div class="tab" data-tab="seat">🚌 座位建議</div>
+  <div class="tab" data-tab="timeline">⏱ 時間軸</div>
+</div>
+
+<div class="panel-container">
+
+  <!-- ===== MAP PANEL ===== -->
+  <div class="panel map-panel active" id="panel-map">
+    <div id="mainMap"></div>
+    <div class="route-overlay" id="routeOverlay">
+      <div class="route-input-row">
+        <div class="route-dot start"></div>
+        <input class="route-input" id="inputStart" placeholder="起點（或用目前位置）" autocomplete="off">
+      </div>
+      <div class="route-input-row">
+        <div class="route-dot end"></div>
+        <input class="route-input" id="inputEnd" placeholder="終點" autocomplete="off">
+      </div>
+      <div class="route-input-row">
+        <div class="route-dot" style="background:var(--sun);"></div>
+        <div style="flex:1;display:flex;gap:6px;align-items:center;">
+          <select id="departMode" class="route-input" style="flex:0 0 auto;width:auto;padding-right:8px;">
+            <option value="now">而家出發</option>
+            <option value="custom">揀時間</option>
+          </select>
+          <input type="datetime-local" id="departTime" class="route-input" style="display:none;flex:1;">
+        </div>
+      </div>
+      <div class="route-actions">
+        <button class="route-btn secondary" onclick="closeRoutePanel()">取消</button>
+        <button class="route-btn secondary" onclick="useMyLocation()">📍 我嘅位置</button>
+        <button class="route-btn primary" onclick="searchRoute()">搵路線</button>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+    <button class="map-fab fab-route" id="fabRoute" onclick="openRoutePanel()">🧭 輸入路線分析日曬</button>
+    <button class="map-fab fab-locate" onclick="locateMe()">📍</button>
+    <button class="map-fab fab-sun-toggle" onclick="toggleSunLayer()">☀️</button>
+    <div class="route-analysis" id="routeAnalysis">
+      <div class="analysis-handle"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <div class="analysis-title" style="margin-bottom:0;">☀️ 路線日曬分析</div>
+        <button onclick="clearRoute()" style="padding:6px 14px;border-radius:8px;border:1px solid var(--card-border);background:var(--shade-deep);color:var(--text-dim);font-size:12px;font-family:'Outfit',sans-serif;cursor:pointer;">✕ 清除路線</button>
+      </div>
+      <div class="analysis-summary" id="analysisSummary"></div>
+      <div id="seatRecommendation" style="margin-bottom:12px;"></div>
+      <div class="seg-list" id="segList"></div>
+    </div>
+    <div class="loading-overlay" id="mapLoading">
+      <div class="spinner"></div><span>搜尋緊路線⋯</span>
+    </div>
+  </div>
+
+  <!-- ===== COMPASS PANEL ===== -->
+  <div class="panel" id="panel-compass">
+    <div class="time-mode-bar">
+      <div class="time-toggle" data-panel="compass">
+        <button class="time-toggle-btn active" data-mode="now">現在</button>
+        <button class="time-toggle-btn" data-mode="custom">自訂時間</button>
+      </div>
+      <input type="datetime-local" id="compassTimeCustom" style="display:none;">
+    </div>
+    <div class="compass-wrap">
+      <div class="compass-container">
+        <div class="compass-bg"></div>
+        <div class="compass-labels">
+          <span class="n">N 北</span><span class="s">S 南</span>
+          <span class="e">E 東</span><span class="w">W 西</span>
+        </div>
+        <div class="compass-line" id="sunLine"></div>
+        <div class="sun-marker" id="sunMarker"></div>
+        <div class="compass-center"></div>
+      </div>
+    </div>
+    <div class="info-grid">
+      <div class="info-card">
+        <div class="info-label">方位角 Azimuth</div>
+        <div class="info-value" id="azimuthVal">--°</div>
+        <div class="info-sub" id="azimuthDir">--</div>
+      </div>
+      <div class="info-card">
+        <div class="info-label">仰角 Altitude</div>
+        <div class="info-value" id="altitudeVal">--°</div>
+        <div class="info-sub" id="altitudeDesc">--</div>
+      </div>
+      <div class="info-card">
+        <div class="info-label">日出 Sunrise</div>
+        <div class="info-value" id="sunriseVal">--:--</div>
+      </div>
+      <div class="info-card">
+        <div class="info-label">日落 Sunset</div>
+        <div class="info-value" id="sunsetVal">--:--</div>
+      </div>
+      <div class="info-card full-width">
+        <div class="daylight-bar" style="--sunrise-pct:25%;--sunset-pct:75%;" id="daylightBar">
+          <div class="daylight-now" id="daylightNow"></div>
+        </div>
+        <div class="daylight-labels"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== SEAT PANEL ===== -->
+  <div class="panel" id="panel-seat">
+    <div class="time-mode-bar">
+      <div class="time-toggle" data-panel="seat">
+        <button class="time-toggle-btn active" data-mode="now">現在</button>
+        <button class="time-toggle-btn" data-mode="custom">自訂時間</button>
+      </div>
+      <input type="datetime-local" id="seatTimeCustom" style="display:none;">
+    </div>
+    <div class="seat-section">
+      <h3>🧭 你嘅行車方向</h3>
+      <div class="direction-picker">
+        <div class="dir-btn" data-dir="0">北 ↑</div>
+        <div class="dir-btn" data-dir="45">東北 ↗</div>
+        <div class="dir-btn" data-dir="90">東 →</div>
+        <div class="dir-btn" data-dir="135">東南 ↘</div>
+        <div class="dir-btn" data-dir="180">南 ↓</div>
+        <div class="dir-btn" data-dir="225">西南 ↙</div>
+        <div class="dir-btn" data-dir="270">西 ←</div>
+        <div class="dir-btn" data-dir="315">西北 ↖</div>
+      </div>
+      <div class="vehicle-diagram">
+        <div class="vehicle">
+          <div class="vehicle-label">行車方向</div>
+          <div class="v-seat left front neutral" id="seatFL">左前</div>
+          <div class="v-seat right front neutral" id="seatFR">右前</div>
+          <div class="v-seat left back neutral" id="seatBL">左後</div>
+          <div class="v-seat right back neutral" id="seatBR">右後</div>
+          <div class="sun-indicator" id="vehicleSun">☀️</div>
+        </div>
+      </div>
+      <div class="seat-result night" id="seatResult"><div>請選擇行車方向</div></div>
+    </div>
+    <div class="seat-section">
+      <h3>💡 小貼士</h3>
+      <p style="font-size:12px;color:var(--text-dim);line-height:1.7;">
+        太陽從東方升起、西方落下。上午搭車向南行，太陽喺左手邊（東），坐右邊避曬。下午則相反。去「路線地圖」tab 輸入起點終點，自動分析全程邊段曬到！
+      </p>
+    </div>
+  </div>
+
+  <!-- ===== TIMELINE PANEL ===== -->
+  <div class="panel" id="panel-timeline">
+    <div class="time-mode-bar">
+      <div class="time-toggle" data-panel="timeline">
+        <button class="time-toggle-btn active" data-mode="now">今日</button>
+        <button class="time-toggle-btn" data-mode="custom">其他日期</button>
+      </div>
+      <input type="date" id="timelineDateCustom" style="display:none;flex:1;min-width:0;padding:7px 10px;border-radius:8px;border:1px solid var(--card-border);background:var(--shade-deep);color:var(--text);font-size:16px;font-family:'Outfit',sans-serif;outline:none;margin-left:6px;">
+    </div>
+    <div class="timeline-wrap">
+      <h3>🕐 模擬時間</h3>
+      <div class="time-display" id="simTimeDisplay">12:00</div>
+      <input type="range" id="timeSlider" min="0" max="1440" value="720" step="5">
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-dim);margin-top:4px;">
+        <span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span>
+      </div>
+    </div>
+    <div class="info-grid">
+      <div class="info-card">
+        <div class="info-label">模擬方位角</div>
+        <div class="info-value" id="simAzimuth">--°</div>
+      </div>
+      <div class="info-card">
+        <div class="info-label">模擬仰角</div>
+        <div class="info-value" id="simAltitude">--°</div>
+      </div>
+    </div>
+    <div class="seat-section">
+      <h3>📊 日照弧線（今日）</h3>
+      <canvas id="arcChart" width="400" height="200" style="width:100%;border-radius:12px;background:var(--shade-deep);"></canvas>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ============================================================
+// SunCalc (MIT, Vladimir Agafonkin) — embedded
+// ============================================================
+const SunCalc=(function(){const PI=Math.PI,rad=PI/180,dayMs=864e5,J1970=2440588,J2000=2451545;function toJulian(d){return d.valueOf()/dayMs-0.5+J1970}function fromJulian(j){return new Date((j+0.5-J1970)*dayMs)}function toDays(d){return toJulian(d)-J2000}const e=rad*23.4397;function rightAscension(l,b){return Math.atan2(Math.sin(l)*Math.cos(e)-Math.tan(b)*Math.sin(e),Math.cos(l))}function declination(l,b){return Math.asin(Math.sin(b)*Math.cos(e)+Math.cos(b)*Math.sin(e)*Math.sin(l))}function azimuth(H,phi,dec){return Math.atan2(Math.sin(H),Math.cos(H)*Math.sin(phi)-Math.tan(dec)*Math.cos(phi))}function altitude(H,phi,dec){return Math.asin(Math.sin(phi)*Math.sin(dec)+Math.cos(phi)*Math.cos(dec)*Math.cos(H))}function siderealTime(d,lw){return rad*(280.16+360.9856235*d)-lw}function solarMeanAnomaly(d){return rad*(357.5291+0.98560028*d)}function eclipticLongitude(M){const C=rad*(1.9148*Math.sin(M)+0.02*Math.sin(2*M)+0.0003*Math.sin(3*M));return M+C+rad*102.9372+PI}function sunCoords(d){const M=solarMeanAnomaly(d),L=eclipticLongitude(M);return{dec:declination(L,0),ra:rightAscension(L,0)}}function getPosition(date,lat,lng){const lw=rad*-lng,phi=rad*lat,d=toDays(date),c=sunCoords(d),H=siderealTime(d,lw)-c.ra;return{azimuth:azimuth(H,phi,c.dec)+PI,altitude:altitude(H,phi,c.dec)}}const J0=0.0009;function julianCycle(d,lw){return Math.round(d-J0-lw/(2*PI))}function approxTransit(Ht,lw,n){return J0+(Ht+lw)/(2*PI)+n}function solarTransitJ(ds,M,L){return J2000+ds+0.0053*Math.sin(M)-0.0069*Math.sin(2*L)}function hourAngle(h,phi,d){return Math.acos((Math.sin(h)-Math.sin(phi)*Math.sin(d))/(Math.cos(phi)*Math.cos(d)))}function getSetJ(h,lw,phi,dec,n,M,L){const w=hourAngle(h,phi,dec);return solarTransitJ(approxTransit(w,lw,n),M,L)}function getTimes(date,lat,lng){const lw=rad*-lng,phi=rad*lat,d=toDays(date),n=julianCycle(d,lw),ds=approxTransit(0,lw,n),M=solarMeanAnomaly(ds),L=eclipticLongitude(M),dec=declination(L,0),Jnoon=solarTransitJ(ds,M,L);let Jset,Jrise;try{Jset=getSetJ(rad*-0.833,lw,phi,dec,n,M,L);Jrise=Jnoon-(Jset-Jnoon)}catch(e){Jset=NaN;Jrise=NaN}return{solarNoon:fromJulian(Jnoon),sunrise:fromJulian(Jrise),sunset:fromJulian(Jset)}}return{getPosition,getTimes}})();
+
+// ============================================================
+// State
+// ============================================================
+let userLat = 22.3193, userLng = 114.1694;
+let currentAz = 0, currentAlt = 0;
+let selectedDir = null;
+let map = null, routeLayer = null, sunLayerGroup = null;
+let showSunOnMap = true;
+let activeInput = null, searchTimeout = null;
+let routeCoords = [];
+
+// ============================================================
+// Helpers
+// ============================================================
+function fmtTime(d) { return (!d||isNaN(d)) ? '--:--' : d.toLocaleTimeString('en-HK',{hour:'2-digit',minute:'2-digit',hour12:false}); }
+function timePct(d) { return (!d||isNaN(d)) ? 50 : ((d.getHours()*60+d.getMinutes())/1440)*100; }
+function compassDir(az) { return ['北 N','東北 NE','東 E','東南 SE','南 S','西南 SW','西 W','西北 NW'][Math.round(az/45)%8]; }
+function localISO(d) { return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16); }
+function updateClock() { document.getElementById('headerTime').textContent = new Date().toLocaleTimeString('en-HK',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}); }
+
+// Get effective time for a panel's time picker
+// panelName: 'compass', 'seat', 'timeline' (uses data-panel attribute on .time-toggle)
+// customId: id of the datetime-local input
+function getPanelTime(panelName, customId) {
+  const toggle = document.querySelector(`.time-toggle[data-panel="${panelName}"]`);
+  const activeBtn = toggle ? toggle.querySelector('.time-toggle-btn.active') : null;
+  const mode = activeBtn ? activeBtn.dataset.mode : 'now';
+  if (mode === 'now') return new Date();
+  const el = document.getElementById(customId);
+  return el && el.value ? new Date(el.value) : new Date();
+}
+
+function calcSunAt(time) {
+  const pos = SunCalc.getPosition(time, userLat, userLng);
+  const az = ((pos.azimuth * 180 / Math.PI) % 360 + 360) % 360;
+  const alt = pos.altitude * 180 / Math.PI;
+  return { az, alt };
+}
+
+// ============================================================
+// Init
+// ============================================================
+document.addEventListener('DOMContentLoaded', () => {
+  setupTabs();
+  setupTimePickers();
+  setupSeatButtons();
+  setupTimeSlider();
+  setupSearchInputs();
+  getLocation();
+  setInterval(updateClock, 1000);
+  updateClock();
+  // Auto-refresh live panels every 30s
+  setInterval(() => { updateCompassPanel(); updateSeatPanel(); updateMapSun(); }, 30000);
+});
+
+function getLocation() {
+  const locEl = document.getElementById('headerLoc');
+  if (!navigator.geolocation) {
+    locEl.textContent = '📍 預設：香港';
+    locEl.style.color = 'var(--sun)';
+    initApp();
+    return;
+  }
+  locEl.textContent = '📍 定位中⋯';
+  navigator.geolocation.getCurrentPosition(
+    p => {
+      userLat = p.coords.latitude;
+      userLng = p.coords.longitude;
+      locEl.textContent = `📍 GPS ${userLat.toFixed(3)}, ${userLng.toFixed(3)}`;
+      locEl.style.color = 'var(--safe)';
+      initApp();
+    },
+    err => {
+      const msgs = { 1: '定位被拒絕', 2: '無法定位', 3: '定位逾時' };
+      locEl.textContent = `📍 ${msgs[err.code] || '定位失敗'}，用預設香港`;
+      locEl.style.color = 'var(--danger)';
+      initApp();
+    },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+}
+
+function initApp() {
+  initMap();
+  updateCompassPanel();
+  updateSeatPanel();
+  updateHeaderSun();
+  updateTimelineSim(720);
+}
+
+// ============================================================
+// Tabs
+// ============================================================
+function setupTabs() {
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+      if (tab.dataset.tab === 'map' && map) map.invalidateSize();
+      if (tab.dataset.tab === 'timeline') drawArcChart();
+    });
+  });
+}
+
+// ============================================================
+// Time Pickers (toggle buttons for compass, seat, timeline)
+// ============================================================
+function setupTimePickers() {
+  const now = localISO(new Date());
+  const today = new Date().toISOString().slice(0, 10);
+  document.getElementById('compassTimeCustom').value = now;
+  document.getElementById('seatTimeCustom').value = now;
+  document.getElementById('timelineDateCustom').value = today;
+
+  // Setup all toggle buttons
+  document.querySelectorAll('.time-toggle').forEach(toggle => {
+    const panel = toggle.dataset.panel;
+    toggle.querySelectorAll('.time-toggle-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        toggle.querySelectorAll('.time-toggle-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const isCustom = btn.dataset.mode === 'custom';
+        // Show/hide the corresponding datetime input
+        const inputMap = { compass: 'compassTimeCustom', seat: 'seatTimeCustom', timeline: 'timelineDateCustom' };
+        const input = document.getElementById(inputMap[panel]);
+        if (input) input.style.display = isCustom ? 'block' : 'none';
+        // Update the panel
+        if (panel === 'compass') updateCompassPanel();
+        else if (panel === 'seat') updateSeatPanel();
+        else if (panel === 'timeline') { updateTimelineSim(parseInt(document.getElementById('timeSlider').value)); drawArcChart(); }
+      });
+    });
+  });
+
+  // Custom input change handlers
+  document.getElementById('compassTimeCustom').addEventListener('change', () => updateCompassPanel());
+  document.getElementById('seatTimeCustom').addEventListener('change', () => updateSeatPanel());
+  document.getElementById('timelineDateCustom').addEventListener('change', () => {
+    updateTimelineSim(parseInt(document.getElementById('timeSlider').value));
+    drawArcChart();
+  });
+
+  // Route depart (still uses select)
+  document.getElementById('departTime').value = now;
+  document.getElementById('departMode').addEventListener('change', e => {
+    document.getElementById('departTime').style.display = e.target.value === 'custom' ? 'block' : 'none';
+  });
+}
+
+// ============================================================
+// Compass Panel
+// ============================================================
+function updateCompassPanel() {
+  const time = getPanelTime('compass', 'compassTimeCustom');
+  const { az, alt } = calcSunAt(time);
+  const times = SunCalc.getTimes(time, userLat, userLng);
+
+  // Also update global for map
+  currentAz = az; currentAlt = alt;
+  updateHeaderSun();
+
+  // Compass marker
+  const marker = document.getElementById('sunMarker');
+  const line = document.getElementById('sunLine');
+  const R = 110, cx0 = 130, cy0 = 130;
+  const altF = Math.max(0, alt) / 90;
+  const dist = R * (1 - altF * 0.7);
+  const azRad = (az - 90) * Math.PI / 180;
+  marker.style.left = (cx0 + dist * Math.cos(azRad)) + 'px';
+  marker.style.top = (cy0 + dist * Math.sin(azRad)) + 'px';
+  marker.classList.toggle('below', alt < 0);
+  line.style.transform = `rotate(${az}deg)`;
+  line.style.height = dist + 'px';
+  line.style.opacity = alt > 0 ? '0.5' : '0.15';
+
+  // Info cards
+  document.getElementById('azimuthVal').textContent = Math.round(az) + '°';
+  document.getElementById('azimuthDir').textContent = compassDir(az);
+  document.getElementById('altitudeVal').textContent = Math.round(alt) + '°';
+  document.getElementById('altitudeDesc').textContent = alt > 0 ? (alt > 60 ? '高掛 ☀️' : alt > 20 ? '中等' : '低角度 🌅') : '地平線以下 🌙';
+  document.getElementById('sunriseVal').textContent = fmtTime(times.sunrise);
+  document.getElementById('sunsetVal').textContent = fmtTime(times.sunset);
+  const rP = timePct(times.sunrise), sP = timePct(times.sunset), nP = timePct(time);
+  document.getElementById('daylightBar').style.setProperty('--sunrise-pct', rP + '%');
+  document.getElementById('daylightBar').style.setProperty('--sunset-pct', sP + '%');
+  document.getElementById('daylightNow').style.left = nP + '%';
+}
+
+function updateHeaderSun() {
+  document.getElementById('headerSun').textContent = `☀️ ${Math.round(currentAz)}° / ${Math.round(currentAlt)}°`;
+}
+
+// ============================================================
+// Seat Panel
+// ============================================================
+function setupSeatButtons() {
+  document.querySelectorAll('.dir-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.dir-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      selectedDir = parseInt(btn.dataset.dir);
+      updateSeatPanel();
+    });
+  });
+}
+
+function updateSeatPanel() {
+  if (selectedDir === null) return;
+  const time = getPanelTime('seat', 'seatTimeCustom');
+  const { az, alt } = calcSunAt(time);
+
+  const result = document.getElementById('seatResult');
+  const sunInd = document.getElementById('vehicleSun');
+  const seats = ['seatFL','seatFR','seatBL','seatBR'].map(id => document.getElementById(id));
+
+  if (alt <= 0) {
+    result.className = 'seat-result night';
+    result.innerHTML = '<div style="font-size:32px;">🌙</div><div>太陽落咗山，唔使擔心！</div>';
+    seats.forEach(s => { s.className = s.className.replace(/safe|danger/g, 'neutral'); });
+    sunInd.style.display = 'none';
+    return;
+  }
+  sunInd.style.display = 'block';
+  let rel = ((az - selectedDir) % 360 + 360) % 360;
+  const vR = (rel - 90) * Math.PI / 180;
+  sunInd.style.left = (65 + 100 * Math.cos(vR) - 11) + 'px';
+  sunInd.style.top = (95 + 100 * Math.sin(vR) - 11) + 'px';
+
+  seats.forEach(s => { s.className = s.className.replace(/safe|danger|neutral/g, 'neutral'); });
+  let sunSide, advice, cls;
+  const [FL,FR,BL,BR] = seats;
+  if (rel >= 10 && rel < 170) {
+    sunSide = '右邊'; advice = '坐左邊避曬！'; cls = 'shade';
+    [FL,BL].forEach(s => { s.className = s.className.replace('neutral','safe'); s.textContent = '✓ 避曬'; });
+    [FR,BR].forEach(s => { s.className = s.className.replace('neutral','danger'); s.textContent = '☀️ 曬'; });
+  } else if (rel >= 190 && rel < 350) {
+    sunSide = '左邊'; advice = '坐右邊避曬！'; cls = 'shade';
+    [FR,BR].forEach(s => { s.className = s.className.replace('neutral','safe'); s.textContent = '✓ 避曬'; });
+    [FL,BL].forEach(s => { s.className = s.className.replace('neutral','danger'); s.textContent = '☀️ 曬'; });
+  } else if (rel >= 170 && rel < 190) {
+    sunSide = '後面'; advice = '兩邊都OK！'; cls = 'shade';
+    seats.forEach(s => { s.className = s.className.replace('neutral','safe'); s.textContent = '✓'; });
+  } else {
+    sunSide = '前面'; advice = '兩邊差唔多'; cls = 'sun-side';
+    seats.forEach(s => s.textContent = s.id.includes('L') ? '左' : '右');
+  }
+  result.className = 'seat-result ' + cls;
+  result.innerHTML = `<div class="seat-big">太陽喺${sunSide}</div><div>${advice}</div>
+    <div style="font-size:11px;color:var(--text-dim);margin-top:3px;">☀️ ${Math.round(az)}° · 🧭 ${selectedDir}° · ${fmtTime(time)}</div>`;
+}
+
+// ============================================================
+// Map
+// ============================================================
+function initMap() {
+  map = L.map('mainMap', { center: [userLat, userLng], zoom: 15, zoomControl: false });
+  L.control.zoom({ position: 'topright' }).addTo(map);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+  window._userMarker = L.circleMarker([userLat, userLng], { radius: 8, fillColor: '#74B9FF', fillOpacity: 1, color: '#fff', weight: 2 }).addTo(map).bindPopup('你嘅位置');
+  sunLayerGroup = L.layerGroup().addTo(map);
+  updateMapSun();
+  if (navigator.geolocation) {
+    navigator.geolocation.watchPosition(p => {
+      userLat = p.coords.latitude; userLng = p.coords.longitude;
+      window._userMarker.setLatLng([userLat, userLng]);
+      const locEl = document.getElementById('headerLoc');
+      locEl.textContent = `📍 GPS ${userLat.toFixed(3)}, ${userLng.toFixed(3)}`;
+      locEl.style.color = 'var(--safe)';
+    }, null, { enableHighAccuracy: true });
+  }
+}
+
+function updateMapSun() {
+  if (!sunLayerGroup) return;
+  sunLayerGroup.clearLayers();
+  if (!showSunOnMap || currentAlt <= 0) return;
+  const azRad = currentAz * Math.PI / 180;
+  const dist = 0.006;
+  const endLat = userLat + dist * Math.cos(azRad);
+  const endLng = userLng + dist * Math.sin(azRad) / Math.cos(userLat * Math.PI / 180);
+  L.polyline([[userLat, userLng], [endLat, endLng]], { color: '#F7B731', weight: 3, opacity: 0.8, dashArray: '8,4' }).addTo(sunLayerGroup);
+  L.marker([endLat, endLng], { icon: L.divIcon({ html: '<div style="font-size:26px;filter:drop-shadow(0 0 8px rgba(247,183,49,0.8));">☀️</div>', iconSize:[28,28], iconAnchor:[14,14], className:'' }) }).addTo(sunLayerGroup);
+  const sAz = (currentAz + 180) % 360, sRad = sAz * Math.PI / 180, spread = 35 * Math.PI / 180, sDist = 0.004;
+  const pts = [[userLat, userLng]];
+  for (let a = sRad - spread; a <= sRad + spread; a += spread / 8) pts.push([userLat + sDist * Math.cos(a), userLng + sDist * Math.sin(a) / Math.cos(userLat * Math.PI / 180)]);
+  pts.push([userLat, userLng]);
+  L.polygon(pts, { color: '#74B9FF', fillColor: '#74B9FF', fillOpacity: 0.12, weight: 1, opacity: 0.3 }).addTo(sunLayerGroup);
+}
+
+function locateMe() { if (map) map.setView([userLat, userLng], 16); }
+function toggleSunLayer() { showSunOnMap = !showSunOnMap; updateMapSun(); }
+
+// ============================================================
+// Route
+// ============================================================
+function openRoutePanel() {
+  document.getElementById('routeOverlay').classList.add('open');
+  document.getElementById('fabRoute').style.display = 'none';
+  document.getElementById('departTime').value = localISO(new Date());
+  document.getElementById('inputStart').focus();
+}
+function closeRoutePanel() {
+  document.getElementById('routeOverlay').classList.remove('open');
+  document.getElementById('fabRoute').style.display = 'flex';
+  document.getElementById('searchResults').classList.remove('show');
+}
+function useMyLocation() {
+  const el = document.getElementById('inputStart');
+  el.value = '📍 我嘅位置'; el.dataset.lat = userLat; el.dataset.lng = userLng;
+  document.getElementById('inputEnd').focus();
+}
+
+function setupSearchInputs() {
+  ['inputStart', 'inputEnd'].forEach(id => {
+    const el = document.getElementById(id);
+    el.addEventListener('focus', () => { activeInput = id; });
+    el.addEventListener('input', () => {
+      clearTimeout(searchTimeout);
+      const q = el.value.trim();
+      if (q.length < 2 || q === '📍 我嘅位置') { document.getElementById('searchResults').classList.remove('show'); return; }
+      searchTimeout = setTimeout(() => geocodeSearch(q), 400);
+    });
+  });
+}
+
+async function geocodeSearch(query) {
+  const res = document.getElementById('searchResults');
+  try {
+    const resp = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&accept-language=zh-HK`);
+    const data = await resp.json();
+    if (!data.length) { res.innerHTML = '<div class="search-item">搵唔到結果</div>'; res.classList.add('show'); return; }
+    res.innerHTML = data.map(d =>
+      `<div class="search-item" onclick="selectPlace('${activeInput}',${d.lat},${d.lon},'${d.display_name.replace(/'/g,"\\'")}')">
+        ${d.display_name.split(',').slice(0,3).join(', ')}
+        <small>${d.type || ''}</small>
+      </div>`
+    ).join('');
+    res.classList.add('show');
+  } catch (e) {
+    res.innerHTML = '<div class="search-item">網絡錯誤，請重試</div>'; res.classList.add('show');
+  }
+}
+
+function selectPlace(inputId, lat, lng, name) {
+  const el = document.getElementById(inputId);
+  el.value = name.split(',').slice(0,2).join(', ');
+  el.dataset.lat = lat; el.dataset.lng = lng;
+  document.getElementById('searchResults').classList.remove('show');
+  if (inputId === 'inputStart') document.getElementById('inputEnd').focus();
+}
+
+function getDepartureTime() {
+  const mode = document.getElementById('departMode').value;
+  if (mode === 'now') return new Date();
+  const val = document.getElementById('departTime').value;
+  return val ? new Date(val) : new Date();
+}
+
+async function searchRoute() {
+  const sE = document.getElementById('inputStart'), eE = document.getElementById('inputEnd');
+  const sLat = parseFloat(sE.dataset.lat), sLng = parseFloat(sE.dataset.lng);
+  const eLat = parseFloat(eE.dataset.lat), eLng = parseFloat(eE.dataset.lng);
+  if (isNaN(sLat) || isNaN(eLat)) { alert('請選擇起點同終點'); return; }
+  document.getElementById('mapLoading').classList.add('show');
+  closeRoutePanel();
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${sLng},${sLat};${eLng},${eLat}?overview=full&geometries=geojson&steps=true`;
+    const data = await (await fetch(url)).json();
+    if (!data.routes?.length) { alert('搵唔到路線'); document.getElementById('mapLoading').classList.remove('show'); return; }
+    const route = data.routes[0];
+    routeCoords = route.geometry.coordinates.map(c => [c[1], c[0]]);
+    if (routeLayer) map.removeLayer(routeLayer);
+    routeLayer = L.layerGroup().addTo(map);
+    analyseRoute(route);
+    map.fitBounds(L.latLngBounds(routeCoords), { padding: [40, 40] });
+    L.marker(routeCoords[0], { icon: L.divIcon({ html: '<div style="background:#00D2D3;width:14px;height:14px;border-radius:50%;border:2px solid #fff;"></div>', iconSize:[14,14], iconAnchor:[7,7], className:'' }) }).addTo(routeLayer);
+    L.marker(routeCoords[routeCoords.length-1], { icon: L.divIcon({ html: '<div style="background:#FF6B6B;width:14px;height:14px;border-radius:50%;border:2px solid #fff;"></div>', iconSize:[14,14], iconAnchor:[7,7], className:'' }) }).addTo(routeLayer);
+  } catch (e) { alert('路線搜尋失敗: ' + e.message); }
+  document.getElementById('mapLoading').classList.remove('show');
+}
+
+function analyseRoute(route) {
+  const steps = route.legs[0].steps;
+  const departTime = getDepartureTime();
+  let cumTime = 0;
+  const segments = [];
+
+  steps.forEach(step => {
+    if (step.distance < 50) return;
+    const coords = step.geometry.coordinates;
+    const midIdx = Math.floor(coords.length / 2);
+    const midLat = coords[midIdx][1], midLng = coords[midIdx][0];
+    const sLat = coords[0][1], sLng = coords[0][0];
+    const eLat = coords[coords.length-1][1], eLng = coords[coords.length-1][0];
+    const bearing = calcBearing(sLat, sLng, eLat, eLng);
+    const arriveTime = new Date(departTime.getTime() + cumTime * 1000);
+    const sunPos = SunCalc.getPosition(arriveTime, midLat, midLng);
+    const sunAz = ((sunPos.azimuth * 180 / Math.PI) % 360 + 360) % 360;
+    const sunAlt = sunPos.altitude * 180 / Math.PI;
+    const relAngle = ((sunAz - bearing) % 360 + 360) % 360;
+
+    let side, seatAdvice, colorClass, adviceClass;
+    if (sunAlt <= 0) { side = '🌙 夜晚'; seatAdvice = '都OK'; colorClass = 'night'; adviceClass = 'ok'; }
+    else if (relAngle >= 10 && relAngle < 170) { side = '☀️ 太陽喺右邊'; seatAdvice = '坐左邊'; colorClass = 'sun-right'; adviceClass = 'left'; }
+    else if (relAngle >= 190 && relAngle < 350) { side = '☀️ 太陽喺左邊'; seatAdvice = '坐右邊'; colorClass = 'sun-left'; adviceClass = 'right'; }
+    else if (relAngle >= 170 && relAngle < 190) { side = '太陽喺後面'; seatAdvice = '都OK'; colorClass = 'sun-back'; adviceClass = 'ok'; }
+    else { side = '太陽喺前面'; seatAdvice = '差唔多'; colorClass = 'sun-front'; adviceClass = 'ok'; }
+
+    segments.push({ bearing, sunAz, sunAlt, side, seatAdvice, colorClass, adviceClass,
+      distance: step.distance, duration: step.duration,
+      coords: coords.map(c => [c[1], c[0]]), name: step.name || '',
+      estTime: arriveTime });
+    cumTime += step.duration;
+  });
+
+  // Draw coloured segments
+  const colors = { 'sun-left': '#FF6B6B', 'sun-right': '#F7B731', 'sun-front': '#FF9F1C', 'sun-back': '#00D2D3', 'night': '#8395A7' };
+  segments.forEach(seg => {
+    L.polyline(seg.coords, { color: colors[seg.colorClass] || '#74B9FF', weight: 5, opacity: 0.85 }).addTo(routeLayer);
+  });
+
+  const totalDist = route.legs[0].distance;
+  const totalTime = route.legs[0].duration;
+  const arrivalTime = new Date(departTime.getTime() + totalTime * 1000);
+  const sunRightDist = segments.filter(s => s.colorClass === 'sun-right').reduce((a,s) => a + s.distance, 0);
+  const sunLeftDist = segments.filter(s => s.colorClass === 'sun-left').reduce((a,s) => a + s.distance, 0);
+  const leftSunPct = totalDist > 0 ? Math.round(sunLeftDist / totalDist * 100) : 0;
+  const rightSunPct = totalDist > 0 ? Math.round(sunRightDist / totalDist * 100) : 0;
+
+  const fmtDT = d => d.toLocaleTimeString('en-HK',{hour:'2-digit',minute:'2-digit',hour12:false});
+
+  document.getElementById('analysisSummary').innerHTML = `
+    <div class="analysis-stat"><div class="label">出發</div><div class="value" style="font-size:16px;">${fmtDT(departTime)}</div></div>
+    <div class="analysis-stat"><div class="label">到達</div><div class="value" style="font-size:16px;">${fmtDT(arrivalTime)}</div></div>
+    <div class="analysis-stat"><div class="label">車程</div><div class="value" style="font-size:16px;">${(totalDist/1000).toFixed(1)}km · ${Math.round(totalTime/60)}分</div></div>
+  `;
+
+  // Seat recommendation
+  let recHTML;
+  if (leftSunPct === 0 && rightSunPct === 0) {
+    recHTML = `<div style="padding:12px;border-radius:12px;background:rgba(131,149,167,0.1);border:1px solid rgba(131,149,167,0.3);text-align:center;">
+      <div style="font-size:13px;color:var(--text-dim);">🌙 全程冇陽光直射，坐邊都得！</div></div>`;
+  } else {
+    const bestSide = leftSunPct <= rightSunPct ? '左邊' : '右邊';
+    recHTML = `
+      <div style="padding:14px;border-radius:12px;background:linear-gradient(135deg,rgba(0,210,211,0.1),rgba(9,132,227,0.1));border:1px solid rgba(0,210,211,0.3);text-align:center;">
+        <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">最佳座位建議</div>
+        <div style="font-size:24px;font-weight:800;color:var(--safe);margin-bottom:8px;">坐${bestSide} ✓</div>
+        <div style="display:flex;justify-content:center;gap:20px;font-size:13px;">
+          <div><span style="color:${leftSunPct<=rightSunPct?'var(--safe)':'var(--danger)'};">左邊</span> 被曬 ${leftSunPct}%</div>
+          <div><span style="color:${rightSunPct<=leftSunPct?'var(--safe)':'var(--danger)'};">右邊</span> 被曬 ${rightSunPct}%</div>
+        </div>
+      </div>`;
+  }
+  document.getElementById('seatRecommendation').innerHTML = recHTML;
+
+  document.getElementById('segList').innerHTML = segments.map(seg => `
+    <div class="seg-item">
+      <div class="seg-color ${seg.colorClass}"></div>
+      <div class="seg-info">
+        <div class="seg-dir">${seg.name || compassDir(seg.bearing) + '方向'} · ${(seg.distance/1000).toFixed(1)}km</div>
+        <div class="seg-detail">${seg.side} · ${fmtDT(seg.estTime)}</div>
+      </div>
+      <div class="seg-advice ${seg.adviceClass}">${seg.seatAdvice}</div>
+    </div>
+  `).join('');
+
+  document.getElementById('routeAnalysis').classList.add('open');
+  document.getElementById('fabRoute').style.display = 'none';
+}
+
+function clearRoute() {
+  if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
+  routeCoords = [];
+  document.getElementById('routeAnalysis').classList.remove('open');
+  document.getElementById('analysisSummary').innerHTML = '';
+  document.getElementById('seatRecommendation').innerHTML = '';
+  document.getElementById('segList').innerHTML = '';
+  document.getElementById('fabRoute').style.display = 'flex';
+  document.getElementById('inputStart').value = '';
+  document.getElementById('inputEnd').value = '';
+  delete document.getElementById('inputStart').dataset.lat;
+  delete document.getElementById('inputStart').dataset.lng;
+  delete document.getElementById('inputEnd').dataset.lat;
+  delete document.getElementById('inputEnd').dataset.lng;
+  document.getElementById('departMode').value = 'now';
+  document.getElementById('departTime').style.display = 'none';
+}
+
+function calcBearing(lat1, lon1, lat2, lon2) {
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const y = Math.sin(dLon) * Math.cos(lat2 * Math.PI / 180);
+  const x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180) -
+            Math.sin(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.cos(dLon);
+  return ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
+}
+
+// ============================================================
+// Timeline
+// ============================================================
+function setupTimeSlider() {
+  document.getElementById('timeSlider').addEventListener('input', e => updateTimelineSim(parseInt(e.target.value)));
+}
+
+function getTimelineBaseDate() {
+  const toggle = document.querySelector('.time-toggle[data-panel="timeline"]');
+  const activeBtn = toggle ? toggle.querySelector('.time-toggle-btn.active') : null;
+  const mode = activeBtn ? activeBtn.dataset.mode : 'now';
+  if (mode === 'now') { const d = new Date(); d.setHours(0,0,0,0); return d; }
+  const val = document.getElementById('timelineDateCustom').value;
+  return val ? new Date(val + 'T00:00:00') : (() => { const d = new Date(); d.setHours(0,0,0,0); return d; })();
+}
+
+function updateTimelineSim(mins) {
+  const base = getTimelineBaseDate();
+  const d = new Date(base.getTime() + mins * 60000);
+  const { az, alt } = calcSunAt(d);
+  document.getElementById('simTimeDisplay').textContent = String(Math.floor(mins/60)).padStart(2,'0') + ':' + String(mins%60).padStart(2,'0');
+  document.getElementById('simAzimuth').textContent = Math.round(az) + '°';
+  document.getElementById('simAltitude').textContent = Math.round(alt) + '°';
+}
+
+function drawArcChart() {
+  const canvas = document.getElementById('arcChart');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  const zeroY = H * 0.72;
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 1;
+  for (let h = 0; h <= 24; h += 6) { const x = (h/24)*W; ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.setLineDash([4,4]);
+  ctx.beginPath(); ctx.moveTo(0,zeroY); ctx.lineTo(W,zeroY); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.font = '10px JetBrains Mono';
+  ctx.fillText('0°', 4, zeroY - 3);
+  for (let h = 0; h <= 24; h += 6) ctx.fillText(String(h).padStart(2,'0')+':00', (h/24)*W+2, H-4);
+
+  const today = getTimelineBaseDate();
+  const pts = [];
+  for (let m = 0; m <= 1440; m += 10) {
+    const alt = SunCalc.getPosition(new Date(today.getTime()+m*60000), userLat, userLng).altitude * 180 / Math.PI;
+    pts.push({ m, alt });
+  }
+  ctx.beginPath();
+  pts.forEach((p,i) => { const x=(p.m/1440)*W, y=zeroY-(p.alt/90)*zeroY*0.9; i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
+  ctx.lineTo(W,zeroY); ctx.lineTo(0,zeroY); ctx.closePath();
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'rgba(247,183,49,0.25)'); g.addColorStop(0.7,'rgba(247,183,49,0.03)');
+  ctx.fillStyle = g; ctx.fill();
+  ctx.beginPath();
+  pts.forEach((p,i) => { const x=(p.m/1440)*W, y=zeroY-(p.alt/90)*zeroY*0.9; i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
+  ctx.strokeStyle = '#F7B731'; ctx.lineWidth = 2.5; ctx.stroke();
+  // Current time marker (only if viewing today)
+  const now = new Date();
+  const isToday = today.toDateString() === new Date().toDateString();
+  if (isToday) {
+    const nM = now.getHours()*60+now.getMinutes();
+    const nX = (nM/1440)*W, nAlt = SunCalc.getPosition(now, userLat, userLng).altitude*180/Math.PI;
+    const nY = zeroY - (nAlt/90)*zeroY*0.9;
+    ctx.beginPath(); ctx.arc(nX,nY,5,0,Math.PI*2); ctx.fillStyle='#fff'; ctx.fill();
+    ctx.beginPath(); ctx.arc(nX,nY,3,0,Math.PI*2); ctx.fillStyle='#F7B731'; ctx.fill();
+  }
+}
+
+// ============================================================
+// Service Worker Registration
+// ============================================================
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
